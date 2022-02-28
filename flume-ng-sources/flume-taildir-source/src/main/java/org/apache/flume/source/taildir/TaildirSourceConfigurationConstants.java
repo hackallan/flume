@@ -29,6 +29,8 @@ public class TaildirSourceConfigurationConstants {
   public static final String POSITION_FILE = "positionFile";
   public static final String DEFAULT_POSITION_FILE = "/.flume/taildir_position.json";
 
+  public static final String RM_FILE_PATH_DIR = "rmFilePathDir";
+  public static final String DEFAULT_RM_FILE_PATH = "/.flume/temp";
   /** What size to batch with before sending to ChannelProcessor. */
   public static final String BATCH_SIZE = "batchSize";
   public static final int DEFAULT_BATCH_SIZE = 100;
@@ -43,7 +45,16 @@ public class TaildirSourceConfigurationConstants {
 
   /** Interval time (ms) to write the last position of each file on the position file. */
   public static final String WRITE_POS_INTERVAL = "writePosInterval";
+  public static final String LOG_INTERVAL = "logInterval";
   public static final int DEFAULT_WRITE_POS_INTERVAL = 3000;
+
+  public static final String CLEAR_LOG_INTERVAL = "clearLogInterval";
+  public static final int DEFAULT_CLEAR_LOG_INTERVAL = 7;
+  public static final int DEFAULT_RM_INTERVAL = 5;
+
+  public static final String  SPOOL_DIR_INTERVAL = "spoolDirInterval";
+  public static final int  DEFAULT_SPOOL_DIR_INTERVAL = 1;
+
 
   /** Whether to add the byte offset of a tailed line to the header */
   public static final String BYTE_OFFSET_HEADER = "byteOffsetHeader";
@@ -67,4 +78,5 @@ public class TaildirSourceConfigurationConstants {
   /** The max number of batch reads from a file in one loop */
   public static final String MAX_BATCH_COUNT = "maxBatchCount";
   public static final Long DEFAULT_MAX_BATCH_COUNT = Long.MAX_VALUE;
+
 }

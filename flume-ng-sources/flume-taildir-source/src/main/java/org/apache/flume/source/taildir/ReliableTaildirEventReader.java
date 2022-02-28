@@ -65,16 +65,16 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
    * Create a ReliableTaildirEventReader to watch the given directory.
    */
   private ReliableTaildirEventReader(Map<String, String> filePaths,
-      Table<String, String, String> headerTable, String positionFilePath,
-      boolean skipToEnd, boolean addByteOffset, boolean cachePatternMatching,
-      boolean annotateFileName, String fileNameHeader) throws IOException {
+                                     Table<String, String, String> headerTable, String positionFilePath,
+                                     boolean skipToEnd, boolean addByteOffset, boolean cachePatternMatching,
+                                     boolean annotateFileName, String fileNameHeader, String rmFilePath) throws IOException {
     // Sanity checks
     Preconditions.checkNotNull(filePaths);
     Preconditions.checkNotNull(positionFilePath);
-
+    Preconditions.checkNotNull(rmFilePath);
     if (logger.isDebugEnabled()) {
       logger.debug("Initializing {} with directory={}, metaDir={}",
-          new Object[] { ReliableTaildirEventReader.class.getSimpleName(), filePaths });
+              new Object[]{ReliableTaildirEventReader.class.getSimpleName(), filePaths});
     }
 
     List<TaildirMatcher> taildirCache = Lists.newArrayList();
@@ -131,7 +131,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
         for (Object v : Arrays.asList(inode, pos, path)) {
           Preconditions.checkNotNull(v, "Detected missing value in position file. "
-              + "inode: " + inode + ", pos: " + pos + ", path: " + path);
+                  + "inode: " + inode + ", pos: " + pos + ", path: " + path);
         }
         TailFile tf = tailFiles.get(inode);
         if (tf != null && tf.updatePos(path, inode, pos)) {
@@ -184,7 +184,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
   }
 
   public List<Event> readEvents(int numEvents, boolean backoffWithoutNL)
-      throws IOException {
+          throws IOException {
     if (!committed) {
       if (currentFile == null) {
         throw new IllegalStateException("current file does not exist. " + currentFile.getPath());
@@ -220,7 +220,9 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     }
   }
 
-  /** Commit the last lines which were read. */
+  /**
+   * Commit the last lines which were read.
+   */
   @Override
   public void commit() throws IOException {
     if (!committed && currentFile != null) {
@@ -262,7 +264,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
             }
             if (f.length() < tf.getPos()) {
               logger.info("Pos " + tf.getPos() + " is larger than file size! "
-                  + "Restarting from pos 0, file: " + tf.getPath() + ", inode: " + inode);
+                      + "Restarting from pos 0, file: " + tf.getPath() + ", inode: " + inode);
               tf.updatePos(tf.getPath(), inode, 0);
             }
           }
@@ -301,6 +303,7 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
     private Map<String, String> filePaths;
     private Table<String, String, String> headerTable;
     private String positionFilePath;
+    private String rmFilePath;
     private boolean skipToEnd;
     private boolean addByteOffset;
     private boolean cachePatternMatching;
@@ -321,6 +324,11 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
     public Builder positionFilePath(String positionFilePath) {
       this.positionFilePath = positionFilePath;
+      return this;
+    }
+
+    public Builder newFilePath(String rmFilePath) {
+      this.rmFilePath = rmFilePath;
       return this;
     }
 
@@ -351,8 +359,8 @@ public class ReliableTaildirEventReader implements ReliableEventReader {
 
     public ReliableTaildirEventReader build() throws IOException {
       return new ReliableTaildirEventReader(filePaths, headerTable, positionFilePath, skipToEnd,
-                                            addByteOffset, cachePatternMatching,
-                                            annotateFileName, fileNameHeader);
+              addByteOffset, cachePatternMatching,
+              annotateFileName, fileNameHeader, rmFilePath);
     }
   }
 

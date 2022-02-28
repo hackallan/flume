@@ -17,6 +17,7 @@
 
 package org.apache.flume.source.taildir;
 
+import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.*;
 import static org.mockito.Mockito.anyListOf;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
@@ -50,14 +51,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.FILE_GROUPS;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.FILE_GROUPS_PREFIX;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.HEADERS_PREFIX;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.POSITION_FILE;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.FILENAME_HEADER;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.FILENAME_HEADER_KEY;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.BATCH_SIZE;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.MAX_BATCH_COUNT;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -70,6 +63,7 @@ public class TestTaildirSource {
   static MemoryChannel channel;
   private File tmpDir;
   private String posFilePath;
+  private String newFilePath;
 
   @Before
   public void setUp() {
@@ -87,6 +81,7 @@ public class TestTaildirSource {
     source.setChannelProcessor(new ChannelProcessor(rcs));
     tmpDir = Files.createTempDir();
     posFilePath = tmpDir.getAbsolutePath() + "/taildir_position_test.json";
+    newFilePath = tmpDir.getAbsolutePath() + "/temp/";
   }
 
   @After
@@ -112,6 +107,7 @@ public class TestTaildirSource {
 
     Context context = new Context();
     context.put(POSITION_FILE, posFilePath);
+    context.put(RM_FILE_PATH_DIR, newFilePath);
     context.put(FILE_GROUPS, "ab c");
     // Tail a.log and b.log
     context.put(FILE_GROUPS_PREFIX + "ab", tmpDir.getAbsolutePath() + "/[ab].log");
@@ -202,15 +198,15 @@ public class TestTaildirSource {
       source.start();
       source.process();
       assertTrue("Reached start or error", LifecycleController.waitForOneOf(
-          source, LifecycleState.START_OR_ERROR));
+              source, LifecycleState.START_OR_ERROR));
       assertEquals("Server is started", LifecycleState.START,
-          source.getLifecycleState());
+              source.getLifecycleState());
 
       source.stop();
       assertTrue("Reached stop or error",
-          LifecycleController.waitForOneOf(source, LifecycleState.STOP_OR_ERROR));
+              LifecycleController.waitForOneOf(source, LifecycleState.STOP_OR_ERROR));
       assertEquals("Server is stopped", LifecycleState.STOP,
-          source.getLifecycleState());
+              source.getLifecycleState());
     }
   }
 
@@ -277,9 +273,9 @@ public class TestTaildirSource {
 
     // 6) Ensure consumption order is in order of last update time
     ArrayList<String> expected = Lists.newArrayList(line1, line2, line3,    // file1
-        line1b, line2b, line3b, // file2
-        line1d, line2d, line3d, // file4
-        line1c, line2c, line3c  // file3
+            line1b, line2b, line3b, // file2
+            line1d, line2d, line3d, // file4
+            line1c, line2c, line3c  // file3
     );
     for (int i = 0; i != expected.size(); ++i) {
       expected.set(i, expected.get(i).trim());
@@ -308,10 +304,10 @@ public class TestTaildirSource {
     System.out.println(consumedOrder);
 
     assertArrayEquals("Files not consumed in expected order", expected.toArray(),
-                      consumedOrder.toArray());
+            consumedOrder.toArray());
   }
 
-  private File configureSource()  throws IOException {
+  private File configureSource() throws IOException {
     File f1 = new File(tmpDir, "file1");
     Files.write("f1\n", f1, Charsets.UTF_8);
 
@@ -376,7 +372,7 @@ public class TestTaildirSource {
     ChannelProcessor cp = Mockito.mock(ChannelProcessor.class);
     source.setChannelProcessor(cp);
     doThrow(new ChannelException("dummy")).doNothing().when(cp)
-        .processEventBatch(anyListOf(Event.class));
+            .processEventBatch(anyListOf(Event.class));
     source.start();
     source.process();
     assertEquals(1, source.getSourceCounter().getChannelWriteFail());
@@ -388,9 +384,9 @@ public class TestTaildirSource {
     File f1 = new File(tmpDir, "file1");
     File f2 = new File(tmpDir, "file2");
     Files.write("file1line1\nfile1line2\n" +
-        "file1line3\nfile1line4\n", f1, Charsets.UTF_8);
+            "file1line3\nfile1line4\n", f1, Charsets.UTF_8);
     Files.write("file2line1\nfile2line2\n" +
-        "file2line3\nfile2line4\n", f2, Charsets.UTF_8);
+            "file2line3\nfile2line4\n", f2, Charsets.UTF_8);
 
     Context context = new Context();
     context.put(POSITION_FILE, posFilePath);
@@ -443,12 +439,13 @@ public class TestTaildirSource {
     File f1 = new File(tmpDir, "file1");
     File f2 = new File(tmpDir, "file2");
     Files.write("file1line1\nfile1line2\n" +
-        "file1line3\nfile1line4\nfile1line5\n", f1, Charsets.UTF_8);
+            "file1line3\nfile1line4\nfile1line5\n", f1, Charsets.UTF_8);
     Files.write("file2line1\nfile2line2\n" +
-        "file2line3\n", f2, Charsets.UTF_8);
+            "file2line3\n", f2, Charsets.UTF_8);
 
     Context context = new Context();
     context.put(POSITION_FILE, posFilePath);
+    context.put(RM_FILE_PATH_DIR, newFilePath);
     context.put(FILE_GROUPS, "fg");
     context.put(FILE_GROUPS_PREFIX + "fg", tmpDir.getAbsolutePath() + "/file.*");
     context.put(BATCH_SIZE, String.valueOf(1));
