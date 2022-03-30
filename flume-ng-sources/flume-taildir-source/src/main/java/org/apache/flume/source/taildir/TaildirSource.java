@@ -17,28 +17,12 @@
 
 package org.apache.flume.source.taildir;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.nio.file.DirectoryStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import com.google.common.collect.*;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import com.google.gson.Gson;
 import org.apache.flume.*;
 import org.apache.flume.client.avro.ReliableSpoolingFileEventReader;
 import org.apache.flume.conf.BatchSizeSupported;
@@ -53,18 +37,20 @@ import org.apache.flume.source.SpoolDirectorySourceConfigurationConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.HashBasedTable;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Table;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import com.google.gson.Gson;
+import java.io.*;
+import java.nio.file.DirectoryStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.*;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.*;
-import static org.apache.flume.source.taildir.TaildirSourceConfigurationConstants.DEFAULT_CLEAR_LOG_INTERVAL;
 
 public class TaildirSource extends AbstractSource implements
         PollableSource, Configurable, BatchSizeSupported {
@@ -78,7 +64,9 @@ public class TaildirSource extends AbstractSource implements
     private String rmFilePath;
     private boolean skipToEnd;
     private boolean byteOffsetHeader;
-
+    //采集完毕需要移除的文件路径
+    private String completePrefix = "complete.";
+    private List<String> mvFile = new ArrayList<>();
     private SourceCounter sourceCounter;
     private ReliableTaildirEventReader reader;
     private ScheduledExecutorService idleFileChecker;
@@ -136,6 +124,7 @@ public class TaildirSource extends AbstractSource implements
 
     @Override
     public synchronized void start() {
+
         logger.info("{} TaildirSource source starting with directory: {}", getName(), filePaths);
         try {
             reader = new ReliableTaildirEventReader.Builder()
@@ -168,6 +157,10 @@ public class TaildirSource extends AbstractSource implements
                     new ThreadFactoryBuilder().setNameFormat("logClearService").build());
             logClearService.scheduleWithFixedDelay(new LogProcessRunnable(),
                     logProcessInitDelay, logInterval, TimeUnit.HOURS);
+
+            //本地测试用
+//            logClearService.scheduleWithFixedDelay(new LogProcessRunnable(),
+//                    logProcessInitDelay, logInterval, TimeUnit.SECONDS);
         }
 
         spoolDirService = Executors.newSingleThreadScheduledExecutor(
@@ -417,9 +410,41 @@ public class TaildirSource extends AbstractSource implements
                 tailFileProcess(tf, false);
                 tf.close();
                 logger.info("Closed file: " + tf.getPath() + ", inode: " + inode + ", pos: " + tf.getPos());
+                //todo: 修改文件名称为complete前缀，然后添加到移动的集合中
+                modifyCompleteFileName(tf.getPath());
             }
         }
         idleInodes.clear();
+    }
+
+    /**
+     * 修改已经完成采集数据的文件
+     */
+    private void modifyCompleteFileName(String srcPath) {
+        // xx/xx/push_data_log.2022032211  -> xx/xx/complete.push_data_log.2022032211
+        int idx = srcPath.lastIndexOf("/");
+        String desPath = srcPath.substring(0, idx + 1) + completePrefix + srcPath.substring(idx + 1);
+        try {
+            File src = new File(srcPath);
+            File des = new File(desPath);
+            if (des.exists()) {
+                boolean delete = des.delete();
+                if (!delete) {
+                    logger.error("failed to delete file:{}", desPath);
+                }
+            }
+
+            if (!src.renameTo(des)) {
+                logger.error("Failed to renameTo file:{}", desPath);
+            } else {
+                //需要移动的文件名称
+                mvFile.add(desPath);
+            }
+
+        } catch (Exception e) {
+            logger.error("");
+        }
+
     }
 
     /**
@@ -457,7 +482,7 @@ public class TaildirSource extends AbstractSource implements
 
         @Override
         public void run() {
-            System.out.println("开始执行日志处理");
+            //System.out.println("开始执行日志处理");
             logProcess();
             clearLog();
         }
@@ -482,7 +507,7 @@ public class TaildirSource extends AbstractSource implements
         try {
             if (this.spoolSource == null) {
 
-                System.out.println("执行retryLogProcess");
+                //System.out.println("执行retryLogProcess");
 
                 this.spoolSource = new SpoolDirectorySource();
 
@@ -502,29 +527,30 @@ public class TaildirSource extends AbstractSource implements
 
             Runnable runner = new SpoolDirectoryRunnable(this.spoolReader, this.sourceCounter);
             runner.run();
-            System.out.println("SpoolDirectorySource source starting with directory: {}" + this.spoolDirectory);
+            logger.info("SpoolDirectorySource source starting with directory: {}" + this.spoolDirectory);
         } catch (Exception e) {
 
-            logger.error("spool dir erro,{}", e.getMessage());
+            logger.error("spool执行失败,{}", e.getMessage());
         }
+
     }
 
     private void clearLog() {
         try {
             Path path = Paths.get(rmFilePath);
-            System.out.println("开始执行清理工作校验 " + rmFilePath + " ,path = " + path);
+            //System.out.println("开始执行清理工作校验 " + rmFilePath + " ,path = " + path);
             if (!Files.exists(path)) {
                 return;
             }
 
             DirectoryStream<Path> paths = Files.newDirectoryStream(path);
-            System.out.println("开始执行清理工作校验 " + paths);
+            //System.out.println("开始执行清理工作校验 " + paths);
             if (paths != null) {
                 Iterator<Path> iterator = paths.iterator();
                 while (iterator.hasNext()) {
                     Path item = iterator.next();
                     String str = item.toString();
-                    System.out.println("开始执行清理工作，当前清理天数 " + logInterval + " 天前，目录位置 " + str);
+                    //System.out.println("开始执行清理工作，当前清理天数 " + logInterval + " 天前，目录位置 " + str);
                     String date = str.substring(str.indexOf("."));
                     String oldDay = LocalDate.now().minusDays(clearLogInterval).format(DateTimeFormatter.ofPattern("yyyyMMdd"));
                     if (date.contains(oldDay)) {
@@ -535,7 +561,7 @@ public class TaildirSource extends AbstractSource implements
             }
 
         } catch (Exception e) {
-            System.out.println("日志清理异常 " + e.getMessage());
+            logger.error("日志清理异常 {}", e.getMessage());
         }
 
     }
@@ -547,24 +573,104 @@ public class TaildirSource extends AbstractSource implements
 
         try {
 
-            List<Long> longs = reader.updateTailFiles(true);
-            longs.remove(longs.size() - 1);//移除最后一个 有可能最后一个文件还在读取中
-            System.out.println("日志移动操作：" + longs.size());
-            if (!longs.isEmpty()) {
+            for (int i = 0; i < mvFile.size(); i++) {
+                String filePath = mvFile.get(i);
 
-                for (Long inode : longs) {
-                    TailFile tf = reader.getTailFiles().get(inode);
-                    //posInfos.add(ImmutableMap.of("inode", inode, "pos", tf.getPos(), "file", tf.getPath()));
-                    //System.out.println("开始执行移动工作一共，" + longs.size() + " 文件");
-                    String name = tf.getPath().substring(tf.getPath().lastIndexOf("/"));
-                    Path target = Paths.get(rmFilePath + name);
-                    Path source = Paths.get(tf.getPath());
-                    Files.move(source, target);
+                String targetPath = null;
+                String zipPath = null;
+                String name = filePath.substring(filePath.lastIndexOf("/"));
+                if (rmFilePath.charAt(rmFilePath.length() - 1) == '/') {
+                    targetPath = rmFilePath + "/" + name;
+
+                    zipPath = rmFilePath + name.replace("/", "") + ".zip";
+                } else {
+                    targetPath = rmFilePath + name;
+                    zipPath = rmFilePath + name + ".zip";
+                }
+                Path target = Paths.get(targetPath);
+                Path source = Paths.get(filePath);
+                Files.move(source, target);
+                mvFile.remove(i);
+                //移动完毕需要对文件做压缩
+                //防止配置中的路径最后有可能有 / ,有可能没有 /
+                //ZipFile(targetPath, zipPath);
+
+            }
+
+            if (filePaths != null) {
+
+                for (Entry item :
+                        filePaths.entrySet()) {
+                    ///Users/joyme/company/log/push_data_log.*
+                    String path = item.getValue().toString();
+                    path = path.substring(0, path.lastIndexOf("/") + 1);
+                    rmRemainCompleteFile(path);
                 }
             }
-        } catch (Throwable t) {
-            logger.error("Failed writing positionFile", t);
+
+        } catch (Exception e) {
+            logger.error("Failed logprocess {}", e.getMessage());
             //System.out.println("日志处理异常了" + t.getMessage());
+        }
+    }
+
+    /**
+     * 移动未移动的完成文件
+     *
+     * @param dir
+     */
+    private void rmRemainCompleteFile(String dir) {
+
+        try {
+            if (dir != null) {
+                File dirFile = new File(dir);
+                File[] files = dirFile.listFiles();
+                for (int i = 0; i < files.length; i++) {
+                    if (files[i].isFile() && files[i].getName().contains(completePrefix)) {
+                        //如果是已经完成的文件还需要移动
+
+                        File reFile = files[i];
+                        logger.info("移动文件名称:{},移动目标地址：{}", reFile.getName(), rmFilePath);
+                        String targetPath = null;
+                        if (rmFilePath.charAt(rmFilePath.length() - 1) == '/') {
+                            targetPath = rmFilePath + reFile.getName();
+                        } else {
+                            targetPath = rmFilePath + "/" + reFile.getName();
+                        }
+                        Path target = Paths.get(targetPath);
+                        Path source = Paths.get(reFile.getPath());
+                        Files.move(source, target);
+                        //移动完毕需要对文件做压缩
+                        //ZipFile(targetPath, targetPath + ".zip");
+                    }
+                }
+            }
+        } catch (Exception e) {
+
+            logger.error("移动未移动的文件异常", e.getMessage());
+        }
+
+    }
+
+    /**
+     * 压缩单个文件
+     */
+    public static void ZipFile(String filepath, String zippath) {
+        try {
+            File file = new File(filepath);
+            File zipFile = new File(zippath);
+            InputStream input = new FileInputStream(file);
+            ZipOutputStream zipOut = new ZipOutputStream(new FileOutputStream(zipFile));
+            zipOut.putNextEntry(new ZipEntry(file.getName()));
+            int temp = 0;
+            while ((temp = input.read()) != -1) {
+                zipOut.write(temp);
+            }
+            input.close();
+            zipOut.close();
+            file.delete();//压缩完毕清理文件
+        } catch (Exception e) {
+            logger.error("Failed zipfile:{},{}", zippath, e.getMessage());
         }
     }
 

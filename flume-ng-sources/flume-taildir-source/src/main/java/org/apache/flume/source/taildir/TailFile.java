@@ -55,7 +55,7 @@ public class TailFile {
   private long lineReadPos;
 
   public TailFile(File file, Map<String, String> headers, long inode, long pos)
-      throws IOException {
+          throws IOException {
     this.raf = new RandomAccessFile(file, "r");
     if (pos > 0) {
       raf.seek(pos);
@@ -128,6 +128,7 @@ public class TailFile {
     }
     return false;
   }
+
   public void updateFilePos(long pos) throws IOException {
     raf.seek(pos);
     lineReadPos = pos;
@@ -137,15 +138,19 @@ public class TailFile {
 
 
   public List<Event> readEvents(int numEvents, boolean backoffWithoutNL,
-      boolean addByteOffset) throws IOException {
+                                boolean addByteOffset) throws IOException {
     List<Event> events = Lists.newLinkedList();
     for (int i = 0; i < numEvents; i++) {
       Event event = readEvent(backoffWithoutNL, addByteOffset);
+
       if (event == null) {
         break;
       }
+
+
       events.add(event);
     }
+
     return events;
   }
 
@@ -157,7 +162,7 @@ public class TailFile {
     }
     if (backoffWithoutNL && !line.lineSepInclude) {
       logger.info("Backing off in file without newline: "
-          + path + ", inode: " + inode + ", pos: " + raf.getFilePointer());
+              + path + ", inode: " + inode + ", pos: " + raf.getFilePointer());
       updateFilePos(posTmp);
       return null;
     }
@@ -213,7 +218,7 @@ public class TailFile {
             oldLen -= 1;
           }
           lineResult = new LineResult(true,
-              concatByteArrays(oldBuffer, 0, oldLen, buffer, bufferPos, lineLen));
+                  concatByteArrays(oldBuffer, 0, oldLen, buffer, bufferPos, lineLen));
           setLineReadPos(lineReadPos + (oldBuffer.length + (i - bufferPos + 1)));
           oldBuffer = new byte[0];
           if (i + 1 < buffer.length) {
@@ -229,7 +234,7 @@ public class TailFile {
       }
       // NEW_LINE not showed up at the end of the buffer
       oldBuffer = concatByteArrays(oldBuffer, 0, oldBuffer.length,
-                                   buffer, bufferPos, buffer.length - bufferPos);
+              buffer, bufferPos, buffer.length - bufferPos);
       bufferPos = NEED_READING;
     }
     return lineResult;
